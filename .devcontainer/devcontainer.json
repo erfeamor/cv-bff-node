@@ -1,0 +1,11 @@
+{
+  "name": "cv-bff-node",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:20",
+  "postCreateCommand": "npm install",
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint", "orta.vscode-jest"]
+    }
+  },
+  "remoteUser": "node"
+}
