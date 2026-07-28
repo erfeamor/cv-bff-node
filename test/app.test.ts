@@ -1,5 +1,5 @@
-const request = require('supertest');
-const { createApp } = require('../src/app');
+import request from 'supertest';
+import { createApp } from '../src/app';
 
 describe('CORS', () => {
   it('allows the configured origin', async () => {

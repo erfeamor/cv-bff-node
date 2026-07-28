@@ -1,5 +1,5 @@
-const request = require('supertest');
-const { createApp } = require('../src/app');
+import request from 'supertest';
+import { createApp } from '../src/app';
 
 describe('GET /api/v1/people/:id', () => {
   const originalFetch = global.fetch;
@@ -20,7 +20,7 @@ describe('GET /api/v1/people/:id', () => {
         location: 'Remote',
         summary: 'Bio',
       }),
-    });
+    }) as unknown as typeof global.fetch;
 
     const res = await request(createApp()).get('/api/v1/people/1');
 
@@ -34,7 +34,10 @@ describe('GET /api/v1/people/:id', () => {
   });
 
   it('propagates upstream errors', async () => {
-    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 404 });
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+    }) as unknown as typeof global.fetch;
 
     const res = await request(createApp()).get('/api/v1/people/99');
 
