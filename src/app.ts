@@ -1,11 +1,11 @@
-const express = require('express');
-const cors = require('cors');
-const { register, metricsMiddleware } = require('./metrics');
-const { requireAuth } = require('./middleware/auth');
-const healthRouter = require('./routes/health');
-const peopleRouter = require('./routes/people');
+import express, { NextFunction, Request, Response } from 'express';
+import cors from 'cors';
+import { register, metricsMiddleware } from './metrics';
+import { requireAuth } from './middleware/auth';
+import healthRouter from './routes/health';
+import peopleRouter from './routes/people';
 
-function createApp() {
+export function createApp() {
   const app = express();
 
   app.use(express.json());
@@ -25,13 +25,12 @@ function createApp() {
   }
   app.use('/api/v1', peopleRouter);
 
-  app.get('/metrics', async (req, res) => {
+  app.get('/metrics', async (_req: Request, res: Response) => {
     res.set('Content-Type', register.contentType);
     res.end(await register.metrics());
   });
 
-  // eslint-disable-next-line no-unused-vars
-  app.use((err, req, res, next) => {
+  app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
     if (err.name === 'UnauthorizedError') {
       return res.status(401).json({ error: 'invalid or missing token' });
     }
@@ -41,5 +40,3 @@ function createApp() {
 
   return app;
 }
-
-module.exports = { createApp };
