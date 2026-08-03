@@ -38,6 +38,19 @@ CI: `.github/workflows/ci.yml` (lint → typecheck → test → build → docker
 
 prom-client histogram (`http_request_duration_seconds`) via `metricsMiddleware` in `src/metrics.ts`; new routes are measured automatically. Don't add per-route custom metrics without a task that asks for them.
 
+## Code review guidance
+
+Priorities, ranked:
+
+1. **Normalization leaks.** Any public payload containing `id`, `personId`, `skillId`, or `email` is a hard blocker — normalization stripping these is this repo's entire job.
+2. **Sequential upstream calls on an aggregate.** New aggregate endpoints (like the `/cv` route) must fetch sections with `Promise.all`, not sequential `await`s.
+3. **Error-mapping drift.** Upstream 404 must pass through as 404; a partial/failed section fetch on an aggregate must map to 502 — not swallowed, not a different code.
+4. A new route that bypasses `createApp()`'s central error handler, or a test that hits a running server instead of `createApp()` directly via supertest.
+
+Don't flag:
+- CommonJS build output (`tsconfig.build.json` targeting `commonjs`) — deliberate, not a missed ESM migration.
+- Missing OpenAPI spec — noted as optional in this repo's stack.
+
 ## Git workflow
 
 `master` is protected — feature branch (`feat/…`) → push → PR via `gh`. Definition of done: tests for the new path, `typecheck`/`lint`/`build` green, `.env.example` current.
