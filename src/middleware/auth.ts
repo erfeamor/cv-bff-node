@@ -2,6 +2,46 @@ import { expressjwt, GetVerificationKey } from 'express-jwt';
 import { expressJwtSecret } from 'jwks-rsa';
 
 /**
+ * One allowlist entry. Structurally the object form of express-unless' `Path`,
+ * declared locally rather than imported so we don't depend on a package that is
+ * only a transitive dependency of express-jwt.
+ */
+interface PublicRoute {
+  url: RegExp;
+  methods: string[];
+}
+
+/**
+ * Public edge path for every BFF API route (docs/api-contract.md § BFF).
+ * CloudFront forwards `/bff/*` without stripping the prefix, so the BFF serves
+ * the exact same URL locally and behind the edge. The old `/api/v1` base is
+ * gone: it collided with cv-domain-service, which owns `/api/*` at the edge.
+ */
+export const API_BASE_PATH = '/bff/api/v1';
+
+/**
+ * The anonymous allowlist: exactly the two routes the contract marks public,
+ * because the public sites have no user to authenticate. Everything else under
+ * API_BASE_PATH stays gated by AUTH_ENABLED.
+ *
+ * Matched on **exact method + full path**, never on prefix. Both entries live
+ * under `/people/:id`, so a prefix-style exemption would look correct today and
+ * silently exempt any future non-GET route added below that path.
+ *
+ * Two details that bite here:
+ *  - express-unless matches plain strings by equality, with no `:param`
+ *    support, so `'/bff/api/v1/people/:id'` would never match. Hence anchored
+ *    regexes with a `[^/]+` id segment.
+ *  - it matches against `req.originalUrl` (`useOriginalUrl`, set explicitly at
+ *    the mount site), i.e. the full path *before* Express strips the router
+ *    mount prefix. These patterns are therefore absolute, not mount-relative.
+ */
+export const PUBLIC_ROUTES: PublicRoute[] = [
+  { url: new RegExp(`^${API_BASE_PATH}/people/[^/]+/?$`), methods: ['GET'] },
+  { url: new RegExp(`^${API_BASE_PATH}/people/[^/]+/cv/?$`), methods: ['GET'] },
+];
+
+/**
  * Validates AWS Cognito JWTs and propagates claims onto req.auth for
  * downstream calls to cv-domain-service.
  */

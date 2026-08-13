@@ -18,11 +18,14 @@ describe('auth toggle', () => {
     process.env = { ...originalEnv };
   });
 
-  it('rejects unauthenticated /api requests when AUTH_ENABLED=true', async () => {
+  // The old `/api/v1` base is gone (it 404s now, see test/auth-matrix.test.ts),
+  // so the toggle is asserted on a non-public route under the new base path.
+  // The full public/gated matrix lives in test/auth-matrix.test.ts.
+  it('rejects unauthenticated non-public API requests when AUTH_ENABLED=true', async () => {
     process.env.AUTH_ENABLED = 'true';
     process.env.COGNITO_ISSUER_URI = 'https://cognito-idp.us-east-1.amazonaws.com/test-pool';
 
-    const res = await request(createApp()).get('/api/v1/people/1');
+    const res = await request(createApp()).post('/bff/api/v1/people/1').send({});
 
     expect(res.status).toBe(401);
   });

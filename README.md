@@ -26,4 +26,8 @@ npm run build               # compile to dist/ (npm start runs dist/index.js)
 
 - `GET /health`
 - `GET /metrics` — Prometheus exposition format
-- `GET /api/v1/people/:id` — normalized person payload sourced from `cv-domain-service`
+- `GET /bff/api/v1/people/:id` — normalized person payload sourced from `cv-domain-service`
+
+API routes are served under the `/bff/api/v1` base path (`docs/api-contract.md` § BFF): the
+edge routes `/bff/*` here and `/api/*` to `cv-domain-service`, without stripping the prefix,
+so URLs are identical locally and in AWS. `/health` and `/metrics` stay at the app root.
