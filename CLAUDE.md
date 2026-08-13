@@ -32,7 +32,7 @@ CI: `.github/workflows/ci.yml` (lint → typecheck → test → build → docker
 
 ## Auth & config
 
-`AUTH_ENABLED=true` mounts Cognito JWT validation (`src/middleware/auth.ts`, jwks-rsa; the `expressJwtSecret` result is cast to `GetVerificationKey`) on `/api/v1/*`; **default is off** for local dev. `/health` and `/metrics` are always public. Config via env only: `PORT`, `DOMAIN_SERVICE_URL`, `CORS_ALLOWED_ORIGINS`, `COGNITO_ISSUER_URI` — document new vars in `.env.example` in the same PR.
+`AUTH_ENABLED=true` mounts Cognito JWT validation (`src/middleware/auth.ts`, jwks-rsa; the `expressJwtSecret` result is cast to `GetVerificationKey`) on `API_BASE_PATH` = `/bff/api/v1/*`, **minus the `PUBLIC_ROUTES` allowlist** (`GET`/`HEAD` on `/bff/api/v1/people/:id` and `.../cv`, matched on exact method + full path, never by prefix; case-insensitive to match Express's default routing); **default is off** for local dev. `/health` and `/metrics` are always public and stay at the app root. The old `/api/v1` base is removed, not dual-mounted — it belongs to cv-domain-service at the edge. Config via env only: `PORT`, `DOMAIN_SERVICE_URL`, `CORS_ALLOWED_ORIGINS`, `COGNITO_ISSUER_URI` — document new vars in `.env.example` in the same PR.
 
 ## Observability
 

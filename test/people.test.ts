@@ -1,7 +1,7 @@
 import request from 'supertest';
 import { createApp } from '../src/app';
 
-describe('GET /api/v1/people/:id', () => {
+describe('GET /bff/api/v1/people/:id', () => {
   const originalFetch = global.fetch;
 
   afterEach(() => {
@@ -22,7 +22,7 @@ describe('GET /api/v1/people/:id', () => {
       }),
     }) as unknown as typeof global.fetch;
 
-    const res = await request(createApp()).get('/api/v1/people/1');
+    const res = await request(createApp()).get('/bff/api/v1/people/1');
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
@@ -39,7 +39,7 @@ describe('GET /api/v1/people/:id', () => {
       status: 404,
     }) as unknown as typeof global.fetch;
 
-    const res = await request(createApp()).get('/api/v1/people/99');
+    const res = await request(createApp()).get('/bff/api/v1/people/99');
 
     expect(res.status).toBe(404);
   });
