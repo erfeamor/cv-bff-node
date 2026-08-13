@@ -35,10 +35,22 @@ export const API_BASE_PATH = '/bff/api/v1';
  *  - it matches against `req.originalUrl` (`useOriginalUrl`, set explicitly at
  *    the mount site), i.e. the full path *before* Express strips the router
  *    mount prefix. These patterns are therefore absolute, not mount-relative.
+ *
+ * The allowlist deliberately mirrors what the router actually dispatches, so a
+ * request the router treats as public is never gated by accident:
+ *  - `HEAD` as well as `GET`: Express auto-generates a HEAD handler for every
+ *    GET route, so omitting it would 401 monitoring probes and CDN HEAD
+ *    requests against an endpoint that is public by contract.
+ *  - the `i` flag: Express routing is case-insensitive by default (`case
+ *    sensitive routing` is not set), so `/BFF/API/V1/PEOPLE/1` already reaches
+ *    the public handler. Do NOT "tighten" this by dropping the flag — it
+ *    widens nothing (no gated route becomes reachable; a mixed-case gated path
+ *    is still gated by the same rule) and only stops over-gating a route that
+ *    is already public.
  */
 export const PUBLIC_ROUTES: PublicRoute[] = [
-  { url: new RegExp(`^${API_BASE_PATH}/people/[^/]+/?$`), methods: ['GET'] },
-  { url: new RegExp(`^${API_BASE_PATH}/people/[^/]+/cv/?$`), methods: ['GET'] },
+  { url: new RegExp(`^${API_BASE_PATH}/people/[^/]+/?$`, 'i'), methods: ['GET', 'HEAD'] },
+  { url: new RegExp(`^${API_BASE_PATH}/people/[^/]+/cv/?$`, 'i'), methods: ['GET', 'HEAD'] },
 ];
 
 /**

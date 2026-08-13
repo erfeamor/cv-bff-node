@@ -56,6 +56,29 @@ describe('auth matrix on /bff/api/v1', () => {
       });
     });
 
+    // Express auto-generates a HEAD handler for every GET route, so a probe or
+    // CDN doing HEAD against a public endpoint must not be gated.
+    it('serves HEAD on the public route anonymously', async () => {
+      enableAuth();
+      mockPersonUpstream();
+
+      const res = await request(createApp()).head('/bff/api/v1/people/1');
+
+      expect(res.status).toBe(200);
+    });
+
+    // Express routing is case-insensitive by default, so a mixed-case URL
+    // reaches the same public handler; the allowlist must agree or it 401s a
+    // route the router already treats as public.
+    it('serves a mixed-case public path anonymously', async () => {
+      enableAuth();
+      mockPersonUpstream();
+
+      const res = await request(createApp()).get('/BFF/API/V1/People/1');
+
+      expect(res.status).toBe(200);
+    });
+
     // The allowlist matches the path, not the raw URL: a query string must not
     // turn a public route back into a 401.
     it('serves the public route anonymously with a query string attached', async () => {
