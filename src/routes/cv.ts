@@ -63,10 +63,52 @@ interface PublicCv {
   projects: PublicProject[];
 }
 
-type PublicExperience = Omit<DomainExperience, 'id'>;
-type PublicEducation = Omit<DomainEducation, 'id'>;
-type PublicSkill = Omit<DomainSkillAssignment, 'skillId'>;
-type PublicProject = Omit<DomainProject, 'id'>;
+// TRANSCRIBED FROM docs/api-contract.md (SS Experience, Education, Projects,
+// Skills, and the Aggregate endpoint) -- NOT derived from the Domain* shapes
+// above. They used to be `Omit<Domain*, 'id'>`, which made tsc check the public
+// payload against the very upstream shape this route exists to distrust (T-207).
+//
+// Every contract-OPTIONAL field is declared as a REQUIRED KEY with a
+// possibly-undefined VALUE (`location: string | undefined`), deliberately NOT
+// as `location?: string`. An object literal may omit a `?:` key for free, so
+// `?:` would leave a newly contracted field silently absent from the payload;
+// with `| undefined`, omitting it from a strip* rebuild is TS2741. The wire
+// payload is unchanged either way -- JSON.stringify drops undefined-valued keys
+// (`{a:'x',b:undefined}` -> `{"a":"x"}`), which is why every T-201/T-205 test
+// passes untouched. See test/public-types.test.ts for the guard on both halves.
+//
+// `endDate` is `string | null`: required-but-nullable in the contract, which is
+// a different thing from optional (settled in T-205).
+export interface PublicExperience {
+  company: string;
+  role: string;
+  location: string | undefined;
+  startDate: string;
+  endDate: string | null;
+  description: string | undefined;
+}
+
+export interface PublicEducation {
+  institution: string;
+  degree: string;
+  fieldOfStudy: string | undefined;
+  startDate: string;
+  endDate: string | null;
+}
+
+export interface PublicSkill {
+  name: string;
+  category: string | undefined;
+  proficiency: string;
+}
+
+export interface PublicProject {
+  name: string;
+  description: string | undefined;
+  repoUrl: string | undefined;
+  startDate: string | undefined;
+  endDate: string | null;
+}
 
 function normalizePerson(person: DomainPerson) {
   return {
@@ -89,6 +131,20 @@ function normalizePerson(person: DomainPerson) {
 // fields makes a new upstream field a no-op here instead of a disclosure, and
 // the cost is that a new CONTRACT field needs an edit in this file -- which is
 // the correct place to review a change to the public payload.
+//
+// That cost is now actually ENFORCED, which it was not when T-205 wrote this
+// claim: the Public* types below are transcribed from the contract instead of
+// `Omit<Domain*, 'id'>` (T-207), so the compiler checks these rebuilds in both
+// directions --
+//   * NEW UPSTREAM FIELD (leak): adding a field to a Domain* interface produces
+//     no error here at all. It is simply not copied, so it cannot reach the
+//     anonymous payload under compiler pressure to "fix the build".
+//   * NEW CONTRACT FIELD (drop): adding a field to a Public* interface IS a
+//     TS2741 in the matching normalizer until it is copied -- including
+//     contract-optional fields, which is why those are declared `T | undefined`
+//     rather than `?:`.
+// What the compiler still cannot check is whether a Public* interface matches
+// docs/api-contract.md; that transcription is reviewed by hand.
 //
 // Field lists come from docs/api-contract.md (sections Experience, Education,
 // Projects, Skills, and the Aggregate endpoint), never from the interfaces
