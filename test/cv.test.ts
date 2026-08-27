@@ -324,3 +324,139 @@ describe('GET /bff/api/v1/people/:id/cv', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * T-205. The block above proves the normalizers strip the keys its fixtures
+ * declare -- and cannot prove more than that, because the mocks only ever carry
+ * fields the test author already thought of. These feed each section an upstream
+ * carrying keys NO interface declares, which is what a denylist forwards and an
+ * allowlist drops. `personId` is the realistic leak (the JPA `person` relation
+ * losing its @JsonIgnore); `internalNote` stands in for a column nobody has
+ * invented yet.
+ */
+describe('GET /bff/api/v1/people/:id/cv — undeclared upstream fields', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  it('strips fields the contract does not declare from experiences, even ones nobody named', async () => {
+    const leaky = [{ ...EXPERIENCES[0], personId: 1, internalNote: 'do not ship' }];
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(ok(PERSON))
+      .mockResolvedValueOnce(ok(leaky))
+      .mockResolvedValueOnce(ok(EDUCATIONS))
+      .mockResolvedValueOnce(ok(SKILLS))
+      .mockResolvedValueOnce(ok(PROJECTS)) as unknown as typeof global.fetch;
+
+    const res = await request(createApp()).get('/bff/api/v1/people/1/cv');
+
+    expect(res.body.experiences[0]).not.toHaveProperty('personId');
+    expect(res.body.experiences[0]).not.toHaveProperty('internalNote');
+    expect(JSON.stringify(res.body)).not.toContain('do not ship');
+  });
+
+  it('strips fields the contract does not declare from education, even ones nobody named', async () => {
+    const leaky = [{ ...EDUCATIONS[0], personId: 1, internalNote: 'do not ship' }];
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(ok(PERSON))
+      .mockResolvedValueOnce(ok(EXPERIENCES))
+      .mockResolvedValueOnce(ok(leaky))
+      .mockResolvedValueOnce(ok(SKILLS))
+      .mockResolvedValueOnce(ok(PROJECTS)) as unknown as typeof global.fetch;
+
+    const res = await request(createApp()).get('/bff/api/v1/people/1/cv');
+
+    expect(res.body.education[0]).not.toHaveProperty('personId');
+    expect(res.body.education[0]).not.toHaveProperty('internalNote');
+    expect(JSON.stringify(res.body)).not.toContain('do not ship');
+  });
+
+  it('strips fields the contract does not declare from skills, even ones nobody named', async () => {
+    // A skill ASSIGNMENT row carries a person FK too; `skillId` is the leak the
+    // block above already covers, so these two are the undeclared pair here.
+    const leaky = [{ ...SKILLS[0], personId: 1, internalNote: 'do not ship' }];
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(ok(PERSON))
+      .mockResolvedValueOnce(ok(EXPERIENCES))
+      .mockResolvedValueOnce(ok(EDUCATIONS))
+      .mockResolvedValueOnce(ok(leaky))
+      .mockResolvedValueOnce(ok(PROJECTS)) as unknown as typeof global.fetch;
+
+    const res = await request(createApp()).get('/bff/api/v1/people/1/cv');
+
+    expect(res.body.skills[0]).not.toHaveProperty('personId');
+    expect(res.body.skills[0]).not.toHaveProperty('internalNote');
+    expect(JSON.stringify(res.body)).not.toContain('do not ship');
+  });
+
+  it('strips fields the contract does not declare from projects, even ones nobody named', async () => {
+    const leaky = [{ ...PROJECTS[0], personId: 1, internalNote: 'do not ship' }];
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(ok(PERSON))
+      .mockResolvedValueOnce(ok(EXPERIENCES))
+      .mockResolvedValueOnce(ok(EDUCATIONS))
+      .mockResolvedValueOnce(ok(SKILLS))
+      .mockResolvedValueOnce(ok(leaky)) as unknown as typeof global.fetch;
+
+    const res = await request(createApp()).get('/bff/api/v1/people/1/cv');
+
+    expect(res.body.projects[0]).not.toHaveProperty('personId');
+    expect(res.body.projects[0]).not.toHaveProperty('internalNote');
+    expect(JSON.stringify(res.body)).not.toContain('do not ship');
+  });
+
+  it('preserves every contract field for a sparse payload with no optional fields set', async () => {
+    // The MIRROR-IMAGE defect: a field-by-field rebuild that forgets an optional
+    // field. The happy-path contract test populates every optional, so it proves
+    // declared fields survive when PRESENT; this proves the required and nullable
+    // ones still shape correctly when the optionals are ABSENT, and that no
+    // stray undefined-valued key appears. Both directions, two tests.
+    const sparseExperience = {
+      id: 7,
+      company: 'ACME',
+      role: 'Backend Engineer',
+      startDate: '2022-01-01',
+      endDate: null,
+    };
+    const sparseEducation = {
+      id: 3,
+      institution: 'UNED',
+      degree: 'BSc',
+      startDate: '2015-09-01',
+      endDate: null,
+    };
+    const sparseSkill = { skillId: 42, name: 'Java', proficiency: 'ADVANCED' };
+    const sparseProject = { id: 9, name: 'cv-project', endDate: null };
+
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(ok(PERSON))
+      .mockResolvedValueOnce(ok([sparseExperience]))
+      .mockResolvedValueOnce(ok([sparseEducation]))
+      .mockResolvedValueOnce(ok([sparseSkill]))
+      .mockResolvedValueOnce(ok([sparseProject])) as unknown as typeof global.fetch;
+
+    const res = await request(createApp()).get('/bff/api/v1/people/1/cv');
+
+    expect(res.body.experiences[0]).toEqual({
+      company: 'ACME',
+      role: 'Backend Engineer',
+      startDate: '2022-01-01',
+      endDate: null,
+    });
+    expect(res.body.education[0]).toEqual({
+      institution: 'UNED',
+      degree: 'BSc',
+      startDate: '2015-09-01',
+      endDate: null,
+    });
+    expect(res.body.skills[0]).toEqual({ name: 'Java', proficiency: 'ADVANCED' });
+    expect(res.body.projects[0]).toEqual({ name: 'cv-project', endDate: null });
+  });
+});
