@@ -45,7 +45,11 @@ router.get('/people/:id', async (req: Request, res: Response, next: NextFunction
   }
 
   try {
-    const response = await fetch(`${DOMAIN_SERVICE_URL}/api/v1/people/${id}`);
+    // Encoded after validating, never instead of it (T-204 scope). The guard has
+    // already run, so on today's `/^[0-9]+$/` this is a no-op -- the point is that
+    // the URL's safety no longer rests solely on a regex in another module. If
+    // `PERSON_ID_PATTERN` is ever widened, this line is the local defence.
+    const response = await fetch(`${DOMAIN_SERVICE_URL}/api/v1/people/${encodeURIComponent(id)}`);
     if (!response.ok) {
       return res.status(response.status).json({ error: 'upstream error' });
     }
