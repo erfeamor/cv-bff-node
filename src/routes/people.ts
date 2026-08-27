@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { isValidPersonId } from '../middleware/validate-person-id';
 
 const router = Router();
 
@@ -32,8 +33,19 @@ function normalize(person: DomainPerson): PublicPerson {
 }
 
 router.get('/people/:id', async (req: Request, res: Response, next: NextFunction) => {
+  const id = req.params.id;
+
+  // BEFORE the upstream call -- Express percent-DECODES this param, so without
+  // the guard `..` and `1%2Fadmin` reach the template below as path syntax and
+  // steer the request at a different upstream path (T-204). Same shared guard,
+  // same 400 body as the aggregate route: two public routes, one answer for one
+  // class of input. See validate-person-id.ts for the three checks it applies.
+  if (!isValidPersonId(id)) {
+    return res.status(400).json({ error: 'invalid person id' });
+  }
+
   try {
-    const response = await fetch(`${DOMAIN_SERVICE_URL}/api/v1/people/${req.params.id}`);
+    const response = await fetch(`${DOMAIN_SERVICE_URL}/api/v1/people/${id}`);
     if (!response.ok) {
       return res.status(response.status).json({ error: 'upstream error' });
     }
