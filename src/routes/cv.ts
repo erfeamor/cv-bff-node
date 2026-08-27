@@ -159,7 +159,13 @@ router.get('/people/:id/cv', async (req: Request, res: Response, next: NextFunct
     return res.status(400).json({ error: 'invalid person id' });
   }
 
-  const base = `${DOMAIN_SERVICE_URL}/api/v1/people/${id}`;
+  // Encoded even though the guard above already ran, and NOT because that guard
+  // is in doubt: on today's `/^[0-9]+$/` this call is a provable no-op. It is
+  // here so the safety of these five URLs stops depending on a pattern that
+  // lives in ANOTHER module -- widen that pattern and this line is what keeps
+  // the widening from becoming an injection point. Defence in depth against a
+  // future edit, not redundancy against the current one (T-204 review round 1).
+  const base = `${DOMAIN_SERVICE_URL}/api/v1/people/${encodeURIComponent(id)}`;
 
   // NOTE the singular/plural split, which is the contract's and not a typo:
   // the aggregate key is `education`, the upstream path is `/educations`.
