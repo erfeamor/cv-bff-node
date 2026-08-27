@@ -323,6 +323,51 @@ describe('GET /bff/api/v1/people/:id/cv', () => {
     expect(res.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('rejects a digit run longer than Long.MAX_VALUE with 400 and makes NO upstream call', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+
+    const res = await request(createApp()).get(`/bff/api/v1/people/${'9'.repeat(20)}/cv`);
+
+    // The no-call assertion comes FIRST on purpose: it is the criterion that
+    // matters (T-206 test plan section 2), and when it fails its message names
+    // the number of upstream calls that escaped -- which is the defect itself.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a 300-digit id with 400 and makes NO upstream call', async () => {
+    // The task's other reproduction size. It also defends against a fix that
+    // special-cases "a bit past 19 digits" instead of bounding the value.
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+
+    const res = await request(createApp()).get(`/bff/api/v1/people/${'9'.repeat(300)}/cv`);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a trailing-garbage id (1abc) with 400 and makes NO upstream call', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+
+    const res = await request(createApp()).get('/bff/api/v1/people/1abc/cv');
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects an id with an encoded space (1%20) with 400 and makes NO upstream call', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+
+    const res = await request(createApp()).get('/bff/api/v1/people/1%20/cv');
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(400);
+  });
 });
 
 /**
