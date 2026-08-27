@@ -77,15 +77,53 @@ function normalizePerson(person: DomainPerson) {
   };
 }
 
-// Each normalizer drops exactly one internal key and passes the rest through.
-// Destructuring rather than rebuilding field-by-field is deliberate: a new
-// contract field arrives in the payload without an edit here, and the only way
-// an internal id leaks is if it is named something these do not strip -- which
-// the "no internal ids" test asserts directly rather than trusting.
-const stripExperience = ({ id: _id, ...rest }: DomainExperience): PublicExperience => rest;
-const stripEducation = ({ id: _id, ...rest }: DomainEducation): PublicEducation => rest;
-const stripSkill = ({ skillId: _skillId, ...rest }: DomainSkillAssignment): PublicSkill => rest;
-const stripProject = ({ id: _id, ...rest }: DomainProject): PublicProject => rest;
+// ALLOWLISTS, not denylists (T-205). Each normalizer names every field the
+// contract declares for its section and copies exactly those; anything else the
+// upstream sends is dropped because it was never asked for.
+//
+// What this defends against: cv-domain-service binds JPA entities directly with
+// no DTO layer, so its response shape is whatever the entities happen to carry
+// today. These interfaces are erased at runtime -- spreading the upstream
+// object would forward a newly added column, or a relation that lost its
+// @JsonIgnore, onto this route, ANONYMOUS by contract (T-013). Naming the
+// fields makes a new upstream field a no-op here instead of a disclosure, and
+// the cost is that a new CONTRACT field needs an edit in this file -- which is
+// the correct place to review a change to the public payload.
+//
+// Field lists come from docs/api-contract.md (sections Experience, Education,
+// Projects, Skills, and the Aggregate endpoint), never from the interfaces
+// above. `endDate` is required-but-nullable: assign it directly, never
+// `|| null`, which would collapse a legitimate empty string to null.
+const stripExperience = (e: DomainExperience): PublicExperience => ({
+  company: e.company,
+  role: e.role,
+  location: e.location,
+  startDate: e.startDate,
+  endDate: e.endDate,
+  description: e.description,
+});
+
+const stripEducation = (e: DomainEducation): PublicEducation => ({
+  institution: e.institution,
+  degree: e.degree,
+  fieldOfStudy: e.fieldOfStudy,
+  startDate: e.startDate,
+  endDate: e.endDate,
+});
+
+const stripSkill = (s: DomainSkillAssignment): PublicSkill => ({
+  name: s.name,
+  category: s.category,
+  proficiency: s.proficiency,
+});
+
+const stripProject = (p: DomainProject): PublicProject => ({
+  name: p.name,
+  description: p.description,
+  repoUrl: p.repoUrl,
+  startDate: p.startDate,
+  endDate: p.endDate,
+});
 
 /**
  * Thrown when an upstream fetch fails. `status` is the HTTP status this route
