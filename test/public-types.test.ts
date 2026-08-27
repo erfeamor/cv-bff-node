@@ -1,6 +1,8 @@
 import type {
+  PublicCv,
   PublicEducation,
   PublicExperience,
+  PublicPerson,
   PublicProject,
   PublicSkill,
 } from '../src/routes/cv';
@@ -37,11 +39,24 @@ export const publicProjectKeys: Exact<
   keyof PublicProject,
   'name' | 'description' | 'repoUrl' | 'startDate' | 'endDate'
 > = true;
+export const publicCvKeys: Exact<
+  keyof PublicCv,
+  'name' | 'headline' | 'location' | 'summary' | 'experiences' | 'education' | 'skills' | 'projects'
+> = true;
+
+// The person half is the one the section normalizers' excess-property check
+// does NOT cover on its own: `normalizePerson`'s result is SPREAD into the
+// body, and spread-in properties from a non-fresh type are not checked. It is
+// guarded by annotating that function's return type, so this pins the annotated
+// shape -- `email` in particular, the field this repo ranks a hard blocker.
+export const personalDataStaysOut = (): PublicPerson =>
+  // @ts-expect-error TS2353: 'email' is not in type 'PublicPerson'.
+  ({ name: 'Jane Doe', headline: null, location: null, summary: null, email: 'j@example.com' });
 
 // (b) DROP DIRECTION -- omitting a declared field from a rebuild must be an
 // error, INCLUDING the contract-optional ones. That only holds while every
-// optional field is spelled `T | undefined` (a required key with an
-// undefined-able value): an object literal may omit a `?:` key for free, so a
+// optional field is spelled as a REQUIRED KEY with a nullable/omissible value
+// (`string | null | undefined`): an object literal may omit a `?:` key for free, so a
 // single field slipping back to `?:` would silently reopen the drop direction
 // for that field. These assert that NO key of any Public* type is optional.
 type OptionalKeys<T> = { [K in keyof T]-?: object extends Pick<T, K> ? K : never }[keyof T];
@@ -51,6 +66,7 @@ export const publicExperienceHasNoOptionalKeys: NoOptionalKeys<PublicExperience>
 export const publicEducationHasNoOptionalKeys: NoOptionalKeys<PublicEducation> = true;
 export const publicSkillHasNoOptionalKeys: NoOptionalKeys<PublicSkill> = true;
 export const publicProjectHasNoOptionalKeys: NoOptionalKeys<PublicProject> = true;
+export const publicCvHasNoOptionalKeys: NoOptionalKeys<PublicCv> = true;
 
 // ...and what that buys, spelled out: a rebuild that drops a contract-optional
 // field does not compile. If `location` were `location?: string` this directive
@@ -69,11 +85,37 @@ export const omittingARequiredFieldIsAnError = (): PublicSkill =>
   // @ts-expect-error TS2741: 'proficiency' is missing.
   ({ name: 'TypeScript', category: undefined });
 
+export const omittingAPersonFieldIsAnError = (): PublicPerson =>
+  // @ts-expect-error TS2741: 'summary' is missing.
+  ({ name: 'Jane Doe', headline: null, location: null });
+
 describe('public payload types', () => {
-  it('carries undefined-valued keys off the wire, so `T | undefined` is byte-identical to `?:`', () => {
+  // What production ACTUALLY sends. cv-domain-service has no
+  // @JsonInclude(NON_NULL), so an absent optional arrives as an explicit null
+  // and the normalizers copy it through verbatim: the key is PRESENT and null
+  // on the wire, not dropped. This is why the optionals are `| null` (T-207
+  // review 1) -- the earlier fixture here used an omitted key, a shape the
+  // upstream does not produce.
+  it('passes an upstream null through as a present, null-valued key', () => {
+    const fromUpstream: PublicSkill = { name: 'TypeScript', category: null, proficiency: 'EXPERT' };
+
+    expect(JSON.stringify(fromUpstream)).toBe(
+      '{"name":"TypeScript","category":null,"proficiency":"EXPERT"}'
+    );
+    expect(Object.keys(JSON.parse(JSON.stringify(fromUpstream)))).toEqual([
+      'name',
+      'category',
+      'proficiency',
+    ]);
+  });
+
+  // The omitted-key case is still reachable (the Domain* types spell these
+  // `?: string`), and there `| undefined` is what keeps the payload identical
+  // to the old `?:` spelling -- JSON.stringify drops undefined-valued keys.
+  // T-205's sparse test fixes this half in place at the route level.
+  it('drops an undefined-valued key, so `| undefined` is wire-identical to `?:`', () => {
     const sparse: PublicSkill = { name: 'TypeScript', category: undefined, proficiency: 'EXPERT' };
 
     expect(JSON.stringify(sparse)).toBe('{"name":"TypeScript","proficiency":"EXPERT"}');
-    expect(Object.keys(JSON.parse(JSON.stringify(sparse)))).toEqual(['name', 'proficiency']);
   });
 });

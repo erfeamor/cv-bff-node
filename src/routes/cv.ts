@@ -52,65 +52,91 @@ interface DomainProject {
 }
 
 /** Public-facing shapes: no `id`, `personId`, `skillId` or `email`. */
-interface PublicCv {
+export interface PublicCv {
   name: string;
-  headline?: string;
-  location?: string;
-  summary?: string;
+  headline: string | null | undefined;
+  location: string | null | undefined;
+  summary: string | null | undefined;
   experiences: PublicExperience[];
   education: PublicEducation[];
   skills: PublicSkill[];
   projects: PublicProject[];
 }
 
+/**
+ * The person half of the aggregate -- `normalizePerson`'s return type, and the
+ * reason it HAS one. Without an annotation its result is inferred and then
+ * SPREAD into `body`, and spread-in properties from a non-fresh type get no
+ * excess-property check: `email: person.email` typechecked clean and shipped on
+ * the wire, the one field this repo ranks as a hard blocker (T-207 review 1).
+ * Annotated, that same edit is TS2353 -- the four section normalizers were
+ * already protected this way; this brings the fifth under the same guard.
+ */
+export type PublicPerson = Omit<PublicCv, 'experiences' | 'education' | 'skills' | 'projects'>;
+
 // TRANSCRIBED FROM docs/api-contract.md (SS Experience, Education, Projects,
 // Skills, and the Aggregate endpoint) -- NOT derived from the Domain* shapes
 // above. They used to be `Omit<Domain*, 'id'>`, which made tsc check the public
 // payload against the very upstream shape this route exists to distrust (T-207).
 //
-// Every contract-OPTIONAL field is declared as a REQUIRED KEY with a
-// possibly-undefined VALUE (`location: string | undefined`), deliberately NOT
-// as `location?: string`. An object literal may omit a `?:` key for free, so
-// `?:` would leave a newly contracted field silently absent from the payload;
-// with `| undefined`, omitting it from a strip* rebuild is TS2741. The wire
-// payload is unchanged either way -- JSON.stringify drops undefined-valued keys
-// (`{a:'x',b:undefined}` -> `{"a":"x"}`), which is why every T-201/T-205 test
-// passes untouched. See test/public-types.test.ts for the guard on both halves.
+// Every contract-OPTIONAL field is a REQUIRED KEY with a nullable, omissible
+// VALUE (`location: string | null | undefined`), deliberately NOT `location?:
+// string`. An object literal may omit a `?:` key for free, so `?:` would leave
+// a newly contracted field silently absent from the payload; with a required
+// key, omitting it from a strip* rebuild is TS2741. `endDate` is the same shape
+// for a different reason -- required-but-nullable in the contract, which is not
+// the same thing as optional (settled in T-205).
 //
-// `endDate` is `string | null`: required-but-nullable in the contract, which is
-// a different thing from optional (settled in T-205).
+// WHY `| null`, and why `| undefined` as well. cv-domain-service binds JPA
+// entities directly, declares no @JsonInclude(NON_NULL) and sets no
+// spring.jackson.default-property-inclusion, so Jackson's default ALWAYS
+// applies: an absent optional arrives as an explicit `null`, not as a missing
+// key (asserted upstream in EducationControllerTest:177 and
+// SkillControllerTest:113, both confirmed against live MySQL). `| undefined` is
+// then kept because the Domain* interfaces above spell these `?: string` and
+// are not this task's to change -- so a rebuild copying `e.location` yields
+// `string | undefined` and the public type must admit it. THE CONTRACT IS
+// SILENT on null-vs-absent for optional fields; this is typed to observed
+// upstream behaviour, not to a rule the contract states.
+//
+// The wire payload is unchanged by any of this because the normalizers copy
+// these values VERBATIM -- a `null` upstream stays `null` on the wire, key
+// present. (JSON.stringify's dropping of undefined-valued keys is load-bearing
+// only for the case where the upstream omits a key entirely, which is what
+// T-205's sparse test fixes in place; it is NOT why the payload is unchanged.)
+// See test/public-types.test.ts for the guard on both directions.
 export interface PublicExperience {
   company: string;
   role: string;
-  location: string | undefined;
+  location: string | null | undefined;
   startDate: string;
   endDate: string | null;
-  description: string | undefined;
+  description: string | null | undefined;
 }
 
 export interface PublicEducation {
   institution: string;
   degree: string;
-  fieldOfStudy: string | undefined;
+  fieldOfStudy: string | null | undefined;
   startDate: string;
   endDate: string | null;
 }
 
 export interface PublicSkill {
   name: string;
-  category: string | undefined;
+  category: string | null | undefined;
   proficiency: string;
 }
 
 export interface PublicProject {
   name: string;
-  description: string | undefined;
-  repoUrl: string | undefined;
-  startDate: string | undefined;
+  description: string | null | undefined;
+  repoUrl: string | null | undefined;
+  startDate: string | null | undefined;
   endDate: string | null;
 }
 
-function normalizePerson(person: DomainPerson) {
+function normalizePerson(person: DomainPerson): PublicPerson {
   return {
     name: person.fullName,
     headline: person.headline,
