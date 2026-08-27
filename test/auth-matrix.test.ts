@@ -40,6 +40,24 @@ describe('auth matrix on /bff/api/v1', () => {
     }) as unknown as typeof global.fetch;
   }
 
+  /**
+   * The aggregate fans out to five upstreams: person, then the four sections.
+   * Sections return empty arrays -- this file asserts AUTH, not payload shape,
+   * which is test/cv.test.ts's job.
+   */
+  function mockCvUpstreams() {
+    const person = {
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 1, fullName: 'Jane Doe', email: 'jane@example.com' }),
+    };
+    const emptySection = { ok: true, status: 200, json: async () => [] };
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(person)
+      .mockResolvedValue(emptySection) as unknown as typeof global.fetch;
+  }
+
   describe('with AUTH_ENABLED=true and no token', () => {
     it('serves GET /bff/api/v1/people/:id anonymously', async () => {
       enableAuth();
@@ -90,15 +108,19 @@ describe('auth matrix on /bff/api/v1', () => {
       expect(res.status).toBe(200);
     });
 
-    // The /cv route itself is T-201 and does not exist yet, but the contract
-    // already lists it as public. 404 proves the request reached the router;
-    // a 401 here would mean the exemption never matched.
-    it('exempts GET /bff/api/v1/people/:id/cv from auth (404, not 401)', async () => {
+    // UPDATED BY T-201, which built this route. This test previously asserted
+    // 404 with the comment "the /cv route does not exist yet ... 404 proves the
+    // request reached the router". That proxy was correct while the route was
+    // absent and became wrong the moment it landed -- the endpoint now answers
+    // for real, so the assertion is the real one: an anonymous GET reaches the
+    // aggregate and returns 200 with AUTH_ENABLED=true.
+    it('serves GET /bff/api/v1/people/:id/cv anonymously', async () => {
       enableAuth();
+      mockCvUpstreams();
 
       const res = await request(createApp()).get('/bff/api/v1/people/1/cv');
 
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(200);
     });
 
     it('rejects a non-GET under the public route path with 401', async () => {

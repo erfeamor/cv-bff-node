@@ -4,6 +4,7 @@ import { register, metricsMiddleware } from './metrics';
 import { API_BASE_PATH, PUBLIC_ROUTES, requireAuth } from './middleware/auth';
 import healthRouter from './routes/health';
 import peopleRouter from './routes/people';
+import cvRouter from './routes/cv';
 
 export function createApp() {
   const app = express();
@@ -28,6 +29,7 @@ export function createApp() {
     app.use(API_BASE_PATH, requireAuth().unless({ path: PUBLIC_ROUTES, useOriginalUrl: true }));
   }
   app.use(API_BASE_PATH, peopleRouter);
+  app.use(API_BASE_PATH, cvRouter);
 
   app.get('/metrics', async (_req: Request, res: Response) => {
     res.set('Content-Type', register.contentType);
