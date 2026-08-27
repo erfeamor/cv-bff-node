@@ -323,6 +323,67 @@ describe('GET /bff/api/v1/people/:id/cv', () => {
     expect(res.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('rejects a digit run longer than Long.MAX_VALUE with 400 and makes NO upstream call', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+
+    const res = await request(createApp()).get(`/bff/api/v1/people/${'9'.repeat(20)}/cv`);
+
+    // The no-call assertion comes FIRST on purpose: it is the criterion that
+    // matters (T-206 test plan section 2), and when it fails its message names
+    // the number of upstream calls that escaped -- which is the defect itself.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a 300-digit id with 400 and makes NO upstream call', async () => {
+    // The task's other reproduction size. It also defends against a fix that
+    // special-cases "a bit past 19 digits" instead of bounding the value.
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+
+    const res = await request(createApp()).get(`/bff/api/v1/people/${'9'.repeat(300)}/cv`);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects an absurdly long zero-padded id with 400 and makes NO upstream call', async () => {
+    // Review round 1, BLOCKING. The value bound alone cannot catch this:
+    // BigInt('0'.repeat(9000) + '1') is 1n, comfortably <= Long.MAX_VALUE, so
+    // the guard passed it and the route built a ~9 KB upstream URL and fanned
+    // out five calls -- above cv-domain-service's 8192-byte request limit, so
+    // Tomcat 400s, get() maps non-404 to 502, and T-206's exact symptom is back
+    // through the leading-zero door. A length cap runs BEFORE the parse.
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+
+    const res = await request(createApp()).get(`/bff/api/v1/people/${'0'.repeat(9000)}1/cv`);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a trailing-garbage id (1abc) with 400 and makes NO upstream call', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+
+    const res = await request(createApp()).get('/bff/api/v1/people/1abc/cv');
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects an id with an encoded space (1%20) with 400 and makes NO upstream call', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+
+    const res = await request(createApp()).get('/bff/api/v1/people/1%20/cv');
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(400);
+  });
 });
 
 /**
