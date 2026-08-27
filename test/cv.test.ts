@@ -214,6 +214,44 @@ describe('GET /bff/api/v1/people/:id/cv', () => {
     expect(res.body.skills.map((s: { name: string }) => s.name)).toEqual(['Zsh', 'Ada']);
   });
 
+  it('returns 404 for an unknown person even when a SECTION 404 lands first', async () => {
+    // REGRESSION TEST for the Promise.all race found in T-201's review round 1.
+    // An unknown person makes ALL FIVE upstreams 404 -- every section controller
+    // calls requirePerson() as the first line of findAll. Under Promise.all the
+    // route answered with whichever rejection settled FIRST, so a section could
+    // win over a real network and return 502 where the contract mandates 404.
+    //
+    // The sibling test below cannot catch this: its mocks resolve synchronously
+    // in array order, so the person's rejection always lands first and the bug
+    // is invisible. This one forces the opposite order explicitly.
+    const deferred = new Map<string, (v: unknown) => void>();
+    global.fetch = jest.fn().mockImplementation((url: string) => {
+      return new Promise((resolve) => {
+        deferred.set(String(url), resolve as (v: unknown) => void);
+      });
+    }) as unknown as typeof global.fetch;
+
+    const pending = request(createApp())
+      .get('/bff/api/v1/people/999/cv')
+      .then((r) => r);
+
+    for (let i = 0; i < 20 && deferred.size < 5; i += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(deferred.size).toBe(5);
+
+    const notFound = { ok: false, status: 404 };
+    // Sections first, person LAST -- the ordering the old implementation lost to.
+    for (const [url, resolve] of deferred) {
+      if (!url.endsWith('/people/999')) resolve(notFound);
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+    deferred.get('http://localhost:8080/api/v1/people/999')!(notFound);
+
+    const res = await pending;
+    expect(res.status).toBe(404);
+  });
+
   it('returns 404 when the person is not found upstream', async () => {
     global.fetch = jest
       .fn()

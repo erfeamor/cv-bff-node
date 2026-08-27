@@ -97,6 +97,21 @@ class UpstreamError extends Error {
   }
 }
 
+/**
+ * Returns a settled result's value, rethrowing its reason if it rejected.
+ *
+ * A loop over the results would not type-narrow -- TypeScript cannot carry a
+ * `status === 'rejected'` check made inside a loop back out to the individual
+ * variables -- and, more importantly, a loop would obscure that the ORDER of
+ * these calls is what encodes the contract's error precedence.
+ */
+function unwrap<T>(result: PromiseSettledResult<T>): T {
+  if (result.status === 'rejected') {
+    throw result.reason;
+  }
+  return result.value;
+}
+
 router.get('/people/:id/cv', async (req: Request, res: Response, next: NextFunction) => {
   const id = req.params.id;
 
@@ -119,21 +134,37 @@ router.get('/people/:id/cv', async (req: Request, res: Response, next: NextFunct
   };
 
   try {
-    // Promise.all, not sequential awaits: all five requests are in flight before
-    // any of them resolves. The test proves this with deferred promises rather
-    // than by counting fetch calls, which is identical under both shapes.
-    const [person, experiences, education, skills, projects] = await Promise.all([
-      // Person 404 -> 404. Any OTHER person failure -> 502, and any section
-      // failure -> 502: the contract is silent on a non-404 person failure, and
-      // T-201 ruling 4 fills that silence toward the contract's own stated
-      // reason -- "the public site treats the CV as one unit". Passing the
-      // upstream status through, as `people.ts` does, would leak a 500.
+    // allSettled, NOT Promise.all -- and the difference is a contract bug, not a
+    // style choice. An unknown person makes ALL FIVE upstreams 404, because
+    // every section controller calls requirePerson(personId) as the first line
+    // of findAll (ExperienceController:47 and its three siblings). Promise.all
+    // rejects with whichever rejection lands FIRST, so a section's 404 could
+    // beat the person's over a real network and the route would answer 502
+    // where the contract mandates 404. allSettled removes the race entirely by
+    // waiting for all five, then applying precedence explicitly below.
+    //
+    // The requests still overlap -- allSettled starts them all at once exactly
+    // as Promise.all does, so the parallelism the contract asks for is intact
+    // and its test still passes.
+    const [personR, experiencesR, educationR, skillsR, projectsR] = await Promise.allSettled([
       get<DomainPerson>(base, 404),
       get<DomainExperience[]>(`${base}/experiences`, 502),
       get<DomainEducation[]>(`${base}/educations`, 502),
       get<DomainSkillAssignment[]>(`${base}/skills`, 502),
       get<DomainProject[]>(`${base}/projects`, 502),
     ]);
+
+    // PRECEDENCE, in contract order, and it is the ORDER of these calls that
+    // enforces it: `unwrap` rethrows the stored reason, so whichever is
+    // unwrapped first decides the response. The person goes first because its
+    // 404 means "no such CV" and must win over the section 404s that always
+    // accompany it. Any other person failure, and any section failure, is 502 --
+    // "the public site treats the CV as one unit" (T-201 ruling 4).
+    const person = unwrap(personR);
+    const experiences = unwrap(experiencesR);
+    const education = unwrap(educationR);
+    const skills = unwrap(skillsR);
+    const projects = unwrap(projectsR);
 
     // Order is passed through untouched -- no .sort(), .reverse() or re-keying.
     // Ordering is settled in the contract's Ordering section and owned by the
