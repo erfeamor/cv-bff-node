@@ -5,22 +5,39 @@ const router = Router();
 
 const DOMAIN_SERVICE_URL = process.env.DOMAIN_SERVICE_URL || 'http://localhost:8080';
 
-/** Shape returned by cv-domain-service — includes internal fields we strip. */
+/**
+ * Shape returned by cv-domain-service -- includes internal fields we strip.
+ *
+ * Optionals are `string | null`, NOT `?: string`: contract rule 7 ratifies that
+ * an optional field is always a PRESENT key whose empty value is `null`
+ * (cv-domain-service declares no @JsonInclude, so Jackson's ALWAYS applies).
+ * The key is never missing, so `?:` described a shape the upstream does not
+ * produce (T-210).
+ */
 interface DomainPerson {
   id: number;
   fullName: string;
-  headline?: string;
-  email?: string;
-  location?: string;
-  summary?: string;
+  headline: string | null;
+  email: string | null;
+  location: string | null;
+  summary: string | null;
 }
 
-/** Public-facing shape: no internal `id`, no `email`. */
-interface PublicPerson {
+/**
+ * Public-facing shape: no internal `id`, no `email`.
+ *
+ * Every field is a REQUIRED KEY with a nullable value -- deliberately not `?:`.
+ * An object literal may omit a `?:` key for free, so with `?:` a newly
+ * contracted head field could silently vanish from this ANONYMOUS route
+ * (T-013) with a green build. Required keys make that omission a TS2741.
+ * This is the same guarantee T-207 established on the aggregate; this route
+ * was the half it did not reach (found reviewing T-209).
+ */
+export interface PublicPerson {
   name: string;
-  headline?: string;
-  location?: string;
-  summary?: string;
+  headline: string | null;
+  location: string | null;
+  summary: string | null;
 }
 
 function normalize(person: DomainPerson): PublicPerson {

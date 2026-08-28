@@ -33,6 +33,50 @@ describe('GET /bff/api/v1/people/:id', () => {
     });
   });
 
+  // Contract rule 7 (T-209): an optional is a PRESENT key valued `null`, never
+  // a missing one. This route must pass those values through VERBATIM -- the
+  // type-level guard (test/public-types.test.ts) pins PublicPerson's shape, but
+  // types cannot see a COERCION: `headline: person.headline || null` or `?? ''`
+  // both satisfy PublicPerson and typecheck clean. The aggregate has T-205's
+  // sparse test for exactly this; these are the head route's equivalent (T-210).
+  //
+  // Two fixtures, not one, and EVERY optional carries the same value in each.
+  // A first draft mixed them -- `headline: null`, `location: ''` -- and did NOT
+  // catch `headline: person.headline || null`, because `null || null` is still
+  // null: it would only ever have caught a coercion on whichever single field
+  // happened to be `''`. Uniform fixtures mean a coercion on ANY field fails.
+  function upstream(person: Record<string, unknown>) {
+    return jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 1, fullName: 'Jane Doe', email: 'jane@example.com', ...person }),
+    }) as unknown as typeof global.fetch;
+  }
+
+  it('passes rule-7 nulls through verbatim -- present keys, not dropped, not ""', async () => {
+    global.fetch = upstream({ headline: null, location: null, summary: null });
+
+    const res = await request(createApp()).get('/bff/api/v1/people/1');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ name: 'Jane Doe', headline: null, location: null, summary: null });
+    // Present-and-null, not absent -- and `email` is gone because rule 5 strips
+    // it, not because it was empty.
+    expect(Object.keys(res.body)).toEqual(['name', 'headline', 'location', 'summary']);
+  });
+
+  it('passes an empty string through verbatim -- "" is a value, not "no value"', async () => {
+    global.fetch = upstream({ headline: '', location: '', summary: '' });
+
+    const res = await request(createApp()).get('/bff/api/v1/people/1');
+
+    expect(res.status).toBe(200);
+    // This is the case that catches `|| null` / `?? ''` on ANY of the three.
+    // Collapsing '' to null would erase a real upstream value on an ANONYMOUS
+    // route (T-013).
+    expect(res.body).toEqual({ name: 'Jane Doe', headline: '', location: '', summary: '' });
+  });
+
   it('propagates upstream errors', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: false,
