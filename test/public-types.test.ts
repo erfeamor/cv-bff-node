@@ -80,6 +80,23 @@ export const publicPersonHeadKeys: Exact<
 > = true;
 export const publicPersonHeadHasNoOptionalKeys: NoOptionalKeys<PublicPersonHead> = true;
 
+// (c) SPELLING -- `NoOptionalKeys` alone is NOT enough, verified rather than
+// assumed: it returns true for a REQUIRED key typed `string | undefined`, so a
+// field spelled `imageUrl: string | undefined` passes every assertion above
+// (key set matches, no optional keys, the drop-direction directive still
+// fires) and nothing in the suite fails. That is the exact spelling T-210
+// removed, reintroducible with a green build -- and the normalizer's own
+// comment used to instruct it. Comments cannot fail a build; this can.
+type UndefinedValuedKeys<T> = { [K in keyof T]-?: undefined extends T[K] ? K : never }[keyof T];
+type NoUndefinedValues<T> = Exact<UndefinedValuedKeys<T>, never>;
+
+export const publicExperienceHasNoUndefinedValues: NoUndefinedValues<PublicExperience> = true;
+export const publicEducationHasNoUndefinedValues: NoUndefinedValues<PublicEducation> = true;
+export const publicSkillHasNoUndefinedValues: NoUndefinedValues<PublicSkill> = true;
+export const publicProjectHasNoUndefinedValues: NoUndefinedValues<PublicProject> = true;
+export const publicCvHasNoUndefinedValues: NoUndefinedValues<PublicCv> = true;
+export const publicPersonHeadHasNoUndefinedValues: NoUndefinedValues<PublicPersonHead> = true;
+
 // ...and what that buys, spelled out: a rebuild that drops a contract-optional
 // field does not compile. If `location` were `location?: string` this directive
 // would report an unused '@ts-expect-error' and fail typecheck.

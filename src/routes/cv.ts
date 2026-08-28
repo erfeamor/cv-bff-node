@@ -175,8 +175,11 @@ function normalizePerson(person: DomainPerson): PublicPerson {
 //     anonymous payload under compiler pressure to "fix the build".
 //   * NEW CONTRACT FIELD (drop): adding a field to a Public* interface IS a
 //     TS2741 in the matching normalizer until it is copied -- including
-//     contract-optional fields, which is why those are declared `T | undefined`
-//     rather than `?:`.
+//     contract-optional fields, which is why those are declared `T | null`
+//     rather than `?:`. Spell a new optional `T | null`, never `T | undefined`
+//     and never `?:` -- contract rule 7 says the key is always present with a
+//     `null` empty value, and test/public-types.test.ts fails the build on
+//     either wrong spelling (T-210).
 // What the compiler still cannot check is whether a Public* interface matches
 // docs/api-contract.md; that transcription is reviewed by hand.
 //
