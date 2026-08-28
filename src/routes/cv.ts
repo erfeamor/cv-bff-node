@@ -9,27 +9,27 @@ const DOMAIN_SERVICE_URL = process.env.DOMAIN_SERVICE_URL || 'http://localhost:8
 interface DomainPerson {
   id: number;
   fullName: string;
-  headline?: string;
-  email?: string;
-  location?: string;
-  summary?: string;
+  headline: string | null;
+  email: string | null;
+  location: string | null;
+  summary: string | null;
 }
 
 interface DomainExperience {
   id: number;
   company: string;
   role: string;
-  location?: string;
+  location: string | null;
   startDate: string;
   endDate: string | null;
-  description?: string;
+  description: string | null;
 }
 
 interface DomainEducation {
   id: number;
   institution: string;
   degree: string;
-  fieldOfStudy?: string;
+  fieldOfStudy: string | null;
   startDate: string;
   endDate: string | null;
 }
@@ -38,25 +38,25 @@ interface DomainEducation {
 interface DomainSkillAssignment {
   skillId: number;
   name: string;
-  category?: string;
+  category: string | null;
   proficiency: string;
 }
 
 interface DomainProject {
   id: number;
   name: string;
-  description?: string;
-  repoUrl?: string;
-  startDate?: string;
+  description: string | null;
+  repoUrl: string | null;
+  startDate: string | null;
   endDate: string | null;
 }
 
 /** Public-facing shapes: no `id`, `personId`, `skillId` or `email`. */
 export interface PublicCv {
   name: string;
-  headline: string | null | undefined;
-  location: string | null | undefined;
-  summary: string | null | undefined;
+  headline: string | null;
+  location: string | null;
+  summary: string | null;
   experiences: PublicExperience[];
   education: PublicEducation[];
   skills: PublicSkill[];
@@ -79,60 +79,68 @@ export type PublicPerson = Omit<PublicCv, 'experiences' | 'education' | 'skills'
 // above. They used to be `Omit<Domain*, 'id'>`, which made tsc check the public
 // payload against the very upstream shape this route exists to distrust (T-207).
 //
-// Every contract-OPTIONAL field is a REQUIRED KEY with a nullable, omissible
-// VALUE (`location: string | null | undefined`), deliberately NOT `location?:
-// string`. An object literal may omit a `?:` key for free, so `?:` would leave
-// a newly contracted field silently absent from the payload; with a required
-// key, omitting it from a strip* rebuild is TS2741. `endDate` is the same shape
-// for a different reason -- required-but-nullable in the contract, which is not
-// the same thing as optional (settled in T-205).
+// Every contract-OPTIONAL field is a REQUIRED KEY with a nullable VALUE
+// (`location: string | null`), deliberately NOT `location?: string`. An object
+// literal may omit a `?:` key for free, so `?:` would leave a newly contracted
+// field silently absent from the payload; with a required key, omitting it from
+// a strip* rebuild is TS2741. `endDate` is the same shape for a different
+// reason -- rule 3 gives its `null` the meaning "current", which contract rule 7
+// explicitly does NOT govern (settled in T-205, restated in T-209).
 //
-// WHY `| null`, and why `| undefined` as well. cv-domain-service binds JPA
-// entities directly, declares no @JsonInclude(NON_NULL) and sets no
-// spring.jackson.default-property-inclusion, so Jackson's default ALWAYS
-// applies: an absent optional arrives as an explicit `null`, not as a missing
-// key (asserted upstream in EducationControllerTest:177 and
-// SkillControllerTest:113, both confirmed against live MySQL). `| undefined` is
-// then kept because the Domain* interfaces above spell these `?: string` and
-// are not this task's to change -- so a rebuild copying `e.location` yields
-// `string | undefined` and the public type must admit it. THE CONTRACT IS
-// SILENT on null-vs-absent for optional fields; this is typed to observed
-// upstream behaviour, not to a rule the contract states.
+// WHY `| null` AND NO `| undefined`. Contract rule 7 (amended 2026-08-28,
+// T-209) ratifies that an optional field is always a PRESENT key whose empty
+// value is `null` -- never a missing key. cv-domain-service has always behaved
+// this way (no @JsonInclude, no spring.jackson.default-property-inclusion, so
+// Jackson's ALWAYS applies; asserted in EducationControllerTest and
+// ProjectControllerTest, confirmed against live MySQL), but until T-209 the
+// contract was SILENT and this file said so in a comment. It is no longer
+// silent, so these types are now spelled to a RATIFIED RULE rather than to
+// observed upstream behaviour -- which is what makes dropping `| undefined`
+// legitimate rather than merely convenient (T-210).
+//
+// The `| undefined` half was never a description of the upstream. It was
+// inherited: the Domain* interfaces above used to spell these `?: string`, so a
+// rebuild copying `e.location` yielded `string | undefined` and the public type
+// had to admit it. T-210 corrected Domain* first; the public side then tightens
+// for free, and T-207's guard proves nothing else moved.
 //
 // The wire payload is unchanged by any of this because the normalizers copy
 // these values VERBATIM -- a `null` upstream stays `null` on the wire, key
-// present. (JSON.stringify's dropping of undefined-valued keys is load-bearing
-// only for the case where the upstream omits a key entirely, which is what
-// T-205's sparse test fixes in place; it is NOT why the payload is unchanged.)
+// present. Note what is deliberately NOT done: there is no `?? null`. If the
+// upstream ever violated rule 7 and omitted a key, the value would be
+// `undefined` at runtime whatever the type says, JSON.stringify would drop it,
+// and the payload would degrade to an absent key rather than gaining a
+// fabricated `null`. Rule 7 is a guarantee INHERITED from the producer, not one
+// this file enforces -- exactly as the contract now states.
 // See test/public-types.test.ts for the guard on both directions.
 export interface PublicExperience {
   company: string;
   role: string;
-  location: string | null | undefined;
+  location: string | null;
   startDate: string;
   endDate: string | null;
-  description: string | null | undefined;
+  description: string | null;
 }
 
 export interface PublicEducation {
   institution: string;
   degree: string;
-  fieldOfStudy: string | null | undefined;
+  fieldOfStudy: string | null;
   startDate: string;
   endDate: string | null;
 }
 
 export interface PublicSkill {
   name: string;
-  category: string | null | undefined;
+  category: string | null;
   proficiency: string;
 }
 
 export interface PublicProject {
   name: string;
-  description: string | null | undefined;
-  repoUrl: string | null | undefined;
-  startDate: string | null | undefined;
+  description: string | null;
+  repoUrl: string | null;
+  startDate: string | null;
   endDate: string | null;
 }
 
