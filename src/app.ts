@@ -40,9 +40,28 @@ export function createApp() {
     if (err.name === 'UnauthorizedError') {
       return res.status(401).json({ error: 'invalid or missing token' });
     }
+    // A client error set by Express or its middleware (e.g. the 400 URIError
+    // Express throws decoding a malformed param, before any handler runs) keeps
+    // its status. Only 400-499 is honoured -- anything else an error object
+    // carries (3xx, 5xx, out of range) is a server fault, so the handler can
+    // never be turned into a redirector. The body stays constant and a 4xx is
+    // not logged: it is not an application fault (T-208).
+    const clientStatus = clientErrorStatus(err);
+    if (clientStatus !== undefined) {
+      return res.status(clientStatus).json({ error: 'bad request' });
+    }
     console.error(err);
     res.status(500).json({ error: 'internal server error' });
   });
 
   return app;
+}
+
+function clientErrorStatus(err: Error): number | undefined {
+  const { status, statusCode } = err as Error & { status?: unknown; statusCode?: unknown };
+  const candidate = status ?? statusCode;
+  if (typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 400 && candidate <= 499) {
+    return candidate;
+  }
+  return undefined;
 }

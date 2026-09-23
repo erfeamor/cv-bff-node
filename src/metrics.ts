@@ -11,10 +11,14 @@ const httpRequestDuration = new client.Histogram({
 });
 register.registerMetric(httpRequestDuration);
 
+// Requests that matched no route are bucketed under one constant label. Echoing
+// req.path here let anonymous traffic mint unbounded label values (T-208).
+const UNMATCHED_ROUTE = 'unmatched';
+
 function metricsMiddleware(req: Request, res: Response, next: NextFunction) {
   const end = httpRequestDuration.startTimer();
   res.on('finish', () => {
-    end({ method: req.method, route: req.route?.path || req.path, status_code: res.statusCode });
+    end({ method: req.method, route: req.route?.path || UNMATCHED_ROUTE, status_code: res.statusCode });
   });
   next();
 }
