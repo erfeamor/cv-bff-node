@@ -1,7 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { isValidPersonId } from '../middleware/validate-person-id';
-
-const router = Router();
+import { logServiceTokenFailure, ServiceTokenProvider, upstreamAuthHeaders } from '../service-token';
 
 const DOMAIN_SERVICE_URL = process.env.DOMAIN_SERVICE_URL || 'http://localhost:8080';
 
@@ -243,84 +242,102 @@ function unwrap<T>(result: PromiseSettledResult<T>): T {
   return result.value;
 }
 
-router.get('/people/:id/cv', async (req: Request, res: Response, next: NextFunction) => {
-  const id = req.params.id;
+export function createCvRouter(serviceToken: ServiceTokenProvider): Router {
+  const router = Router();
 
-  // BEFORE any upstream call -- five URLs are built from this value, on a route
-  // that is anonymous by contract (T-013). See validate-person-id.ts and T-204.
-  if (!isValidPersonId(id)) {
-    return res.status(400).json({ error: 'invalid person id' });
-  }
+  router.get('/people/:id/cv', async (req: Request, res: Response, next: NextFunction) => {
+    const id = req.params.id;
 
-  // Encoded even though the guard above already ran, and NOT because that guard
-  // is in doubt: on today's `/^[0-9]+$/` this call is a provable no-op. It is
-  // here so the safety of these five URLs stops depending on a pattern that
-  // lives in ANOTHER module -- widen that pattern and this line is what keeps
-  // the widening from becoming an injection point. Defence in depth against a
-  // future edit, not redundancy against the current one (T-204 review round 1).
-  const base = `${DOMAIN_SERVICE_URL}/api/v1/people/${encodeURIComponent(id)}`;
-
-  // NOTE the singular/plural split, which is the contract's and not a typo:
-  // the aggregate key is `education`, the upstream path is `/educations`.
-  const get = async <T>(url: string, notFoundStatus: number): Promise<T> => {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new UpstreamError(response.status === 404 ? notFoundStatus : 502);
+    // BEFORE any upstream call -- five URLs are built from this value, on a route
+    // that is anonymous by contract (T-013). See validate-person-id.ts and T-204.
+    if (!isValidPersonId(id)) {
+      return res.status(400).json({ error: 'invalid person id' });
     }
-    return (await response.json()) as T;
-  };
 
-  try {
-    // allSettled, NOT Promise.all -- and the difference is a contract bug, not a
-    // style choice. An unknown person makes ALL FIVE upstreams 404, because
-    // every section controller calls requirePerson(personId) as the first line
-    // of findAll (ExperienceController:47 and its three siblings). Promise.all
-    // rejects with whichever rejection lands FIRST, so a section's 404 could
-    // beat the person's over a real network and the route would answer 502
-    // where the contract mandates 404. allSettled removes the race entirely by
-    // waiting for all five, then applying precedence explicitly below.
-    //
-    // The requests still overlap -- allSettled starts them all at once exactly
-    // as Promise.all does, so the parallelism the contract asks for is intact
-    // and its test still passes.
-    const [personR, experiencesR, educationR, skillsR, projectsR] = await Promise.allSettled([
-      get<DomainPerson>(base, 404),
-      get<DomainExperience[]>(`${base}/experiences`, 502),
-      get<DomainEducation[]>(`${base}/educations`, 502),
-      get<DomainSkillAssignment[]>(`${base}/skills`, 502),
-      get<DomainProject[]>(`${base}/projects`, 502),
-    ]);
+    // Encoded even though the guard above already ran, and NOT because that guard
+    // is in doubt: on today's `/^[0-9]+$/` this call is a provable no-op. It is
+    // here so the safety of these five URLs stops depending on a pattern that
+    // lives in ANOTHER module -- widen that pattern and this line is what keeps
+    // the widening from becoming an injection point. Defence in depth against a
+    // future edit, not redundancy against the current one (T-204 review round 1).
+    const base = `${DOMAIN_SERVICE_URL}/api/v1/people/${encodeURIComponent(id)}`;
 
-    // PRECEDENCE, in contract order, and it is the ORDER of these calls that
-    // enforces it: `unwrap` rethrows the stored reason, so whichever is
-    // unwrapped first decides the response. The person goes first because its
-    // 404 means "no such CV" and must win over the section 404s that always
-    // accompany it. Any other person failure, and any section failure, is 502 --
-    // "the public site treats the CV as one unit" (T-201 ruling 4).
-    const person = unwrap(personR);
-    const experiences = unwrap(experiencesR);
-    const education = unwrap(educationR);
-    const skills = unwrap(skillsR);
-    const projects = unwrap(projectsR);
+    // ONE token for all five calls, obtained BEFORE any of them starts: when a
+    // service token is configured and cannot be obtained, no domain call is made
+    // and the route answers 502 (T-211, fail closed). Never logged beyond the
+    // error's fixed message.
+    let headers: Record<string, string>;
+    try {
+      headers = await upstreamAuthHeaders(serviceToken);
+    } catch (err) {
+      logServiceTokenFailure(err);
+      return res.status(502).json({ error: 'upstream error' });
+    }
 
-    // Order is passed through untouched -- no .sort(), .reverse() or re-keying.
-    // Ordering is settled in the contract's Ordering section and owned by the
-    // domain service; sorting here would be a second source of truth.
-    const body: PublicCv = {
-      ...normalizePerson(person),
-      experiences: experiences.map(stripExperience),
-      education: education.map(stripEducation),
-      skills: skills.map(stripSkill),
-      projects: projects.map(stripProject),
+    // NOTE the singular/plural split, which is the contract's and not a typo:
+    // the aggregate key is `education`, the upstream path is `/educations`.
+    const get = async <T>(url: string, notFoundStatus: number): Promise<T> => {
+      const response = await fetch(url, { headers });
+      // Any non-404 failure -- including a 401/403, which with a service token
+      // means OUR credential failed, not the visitor's (T-211) -- is a 502.
+      if (!response.ok) {
+        throw new UpstreamError(response.status === 404 ? notFoundStatus : 502);
+      }
+      return (await response.json()) as T;
     };
 
-    res.json(body);
-  } catch (err) {
-    if (err instanceof UpstreamError) {
-      return res.status(err.status).json({ error: 'upstream error' });
-    }
-    next(err);
-  }
-});
+    try {
+      // allSettled, NOT Promise.all -- and the difference is a contract bug, not a
+      // style choice. An unknown person makes ALL FIVE upstreams 404, because
+      // every section controller calls requirePerson(personId) as the first line
+      // of findAll (ExperienceController:47 and its three siblings). Promise.all
+      // rejects with whichever rejection lands FIRST, so a section's 404 could
+      // beat the person's over a real network and the route would answer 502
+      // where the contract mandates 404. allSettled removes the race entirely by
+      // waiting for all five, then applying precedence explicitly below.
+      //
+      // The requests still overlap -- allSettled starts them all at once exactly
+      // as Promise.all does, so the parallelism the contract asks for is intact
+      // and its test still passes.
+      const [personR, experiencesR, educationR, skillsR, projectsR] = await Promise.allSettled([
+        get<DomainPerson>(base, 404),
+        get<DomainExperience[]>(`${base}/experiences`, 502),
+        get<DomainEducation[]>(`${base}/educations`, 502),
+        get<DomainSkillAssignment[]>(`${base}/skills`, 502),
+        get<DomainProject[]>(`${base}/projects`, 502),
+      ]);
 
-export default router;
+      // PRECEDENCE, in contract order, and it is the ORDER of these calls that
+      // enforces it: `unwrap` rethrows the stored reason, so whichever is
+      // unwrapped first decides the response. The person goes first because its
+      // 404 means "no such CV" and must win over the section 404s that always
+      // accompany it. Any other person failure, and any section failure, is 502 --
+      // "the public site treats the CV as one unit" (T-201 ruling 4).
+      const person = unwrap(personR);
+      const experiences = unwrap(experiencesR);
+      const education = unwrap(educationR);
+      const skills = unwrap(skillsR);
+      const projects = unwrap(projectsR);
+
+      // Order is passed through untouched -- no .sort(), .reverse() or re-keying.
+      // Ordering is settled in the contract's Ordering section and owned by the
+      // domain service; sorting here would be a second source of truth.
+      const body: PublicCv = {
+        ...normalizePerson(person),
+        experiences: experiences.map(stripExperience),
+        education: education.map(stripEducation),
+        skills: skills.map(stripSkill),
+        projects: projects.map(stripProject),
+      };
+
+      res.json(body);
+    } catch (err) {
+      if (err instanceof UpstreamError) {
+        return res.status(err.status).json({ error: 'upstream error' });
+      }
+      next(err);
+    }
+  });
+
+  return router;
+}
