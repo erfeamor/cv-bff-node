@@ -3,10 +3,22 @@ import cors from 'cors';
 import { register, metricsMiddleware } from './metrics';
 import { API_BASE_PATH, PUBLIC_ROUTES, requireAuth } from './middleware/auth';
 import healthRouter from './routes/health';
-import peopleRouter from './routes/people';
-import cvRouter from './routes/cv';
+import { createPeopleRouter } from './routes/people';
+import { createCvRouter } from './routes/cv';
+import { createServiceTokenProvider, serviceTokenConfigFromEnv, ServiceTokenProvider } from './service-token';
 
-export function createApp() {
+export interface AppOptions {
+  /**
+   * The BFF's credential towards cv-domain-service (T-211). Defaults to a
+   * provider built from the environment WHEN THE APP IS CREATED -- tests inject
+   * their own; `src/index.ts` creates the app once, so the token cache is
+   * process-wide in production.
+   */
+  serviceToken?: ServiceTokenProvider;
+}
+
+export function createApp(options: AppOptions = {}) {
+  const serviceToken = options.serviceToken ?? createServiceTokenProvider(serviceTokenConfigFromEnv());
   const app = express();
 
   app.use(express.json());
@@ -28,8 +40,8 @@ export function createApp() {
   if (process.env.AUTH_ENABLED === 'true') {
     app.use(API_BASE_PATH, requireAuth().unless({ path: PUBLIC_ROUTES, useOriginalUrl: true }));
   }
-  app.use(API_BASE_PATH, peopleRouter);
-  app.use(API_BASE_PATH, cvRouter);
+  app.use(API_BASE_PATH, createPeopleRouter(serviceToken));
+  app.use(API_BASE_PATH, createCvRouter(serviceToken));
 
   app.get('/metrics', async (_req: Request, res: Response) => {
     res.set('Content-Type', register.contentType);

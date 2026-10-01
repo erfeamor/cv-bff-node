@@ -27,12 +27,14 @@ CI: `.github/workflows/ci.yml` (lint → typecheck → test → build → docker
 - **`createApp()` factory** in `src/app.ts` (no `listen`) so tests build fresh instances; `src/index.ts` is the only place that listens. Keep it that way.
 - Routes in `src/routes/`, cross-cutting middleware in `src/middleware/`. Upstream calls use global `fetch` (Node ≥18) — no axios.
 - **Normalization is the product**: public payloads never expose internal `id`s or `email`; field names are public-friendly (`fullName` → `name`). See `normalize()` in `src/routes/people.ts`, typed with a `DomainPerson` input / `PublicPerson` output. New endpoints follow the API contract in the meta repo (`docs/api-contract.md`).
-- Error mapping: upstream 404 passes through; upstream/partial failures on aggregates → 502; JWT failures → 401 (handled centrally in `app.ts`).
+- Error mapping: upstream 404 passes through; upstream/partial failures on aggregates → 502; an upstream 401/403 → 502 on every route (it means the BFF's service token failed, never the visitor's); a service-token failure → 502 with no upstream call; JWT failures → 401 (handled centrally in `app.ts`).
 - Tests mock `global.fetch` (see `test/people.test.ts` for the pattern, including `afterEach` restore; the mock is cast `as unknown as typeof global.fetch`). Supertest against `createApp()` — never against a running server.
 
 ## Auth & config
 
 `AUTH_ENABLED=true` mounts Cognito JWT validation (`src/middleware/auth.ts`, jwks-rsa; the `expressJwtSecret` result is cast to `GetVerificationKey`) on `API_BASE_PATH` = `/bff/api/v1/*`, **minus the `PUBLIC_ROUTES` allowlist** (`GET`/`HEAD` on `/bff/api/v1/people/:id` and `.../cv`, matched on exact method + full path, never by prefix; case-insensitive to match Express's default routing); **default is off** for local dev. `/health` and `/metrics` are always public and stay at the app root. The old `/api/v1` base is removed, not dual-mounted — it belongs to cv-domain-service at the edge. Config via env only: `PORT`, `DOMAIN_SERVICE_URL`, `CORS_ALLOWED_ORIGINS`, `COGNITO_ISSUER_URI` — document new vars in `.env.example` in the same PR.
+
+**Service token (T-211).** Upstream calls to cv-domain-service carry `Authorization: Bearer <token>` from `src/service-token.ts`: OAuth2 client_credentials against Cognito, configured by `COGNITO_TOKEN_URL`, `SERVICE_CLIENT_ID`, `SERVICE_CLIENT_SECRET`, `SERVICE_TOKEN_SCOPE`, read when `createApp()` builds its provider (tests inject one via `createApp({ serviceToken })`). All four set → cached until `expires_in` minus min(5 min, 10%), one shared in-flight request, fail closed (502, no upstream call). None set → no header (local stack). Some set → misconfiguration, rejects naming the missing variable names. The secret and the token never appear in logs, error bodies or metrics; errors carry fixed messages only.
 
 ## Observability
 
