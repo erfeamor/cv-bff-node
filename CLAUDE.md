@@ -14,7 +14,7 @@ npm run build              # tsc → dist/ (production output); npm start runs d
 docker build -t cv-bff-node .
 ```
 
-CI: `.github/workflows/ci.yml` (lint → typecheck → test → build → docker image).
+CI: `.github/workflows/ci.yml` (lint → typecheck → test → build → docker image). On a `master` push only, the `deploy` job (OIDC role from repo variable `AWS_DEPLOY_ROLE_ARN`) builds a multi-arch image (amd64 + arm64) → ECR `:latest` + `:<sha>` → SSM document `cv-redeploy-bff-node` targeted by tag `Name=cv-project-domain-service` → CloudFront smoke on `/bff/api/v1/people/1/cv`. Details and rollback: README § Deploy.
 
 ## TypeScript layout
 

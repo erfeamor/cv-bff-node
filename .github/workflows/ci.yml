@@ -31,5 +31,121 @@ jobs:
       - name: Build image
         run: docker build -t cv-bff-node:${{ github.sha }} .
 
-      # Placeholder until cv-infra exposes a registry + deploy target:
-      # push to ECR and roll the service on main.
+      # This job only proves the image builds (single-arch, not pushed) on
+      # every push and PR. Publishing and rolling the container is the
+      # `deploy` job below, master pushes only.
+
+  deploy:
+    # Master pushes only: PRs (and any other branch) never reach AWS.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    needs: [test, docker]
+    permissions:
+      id-token: write # GitHub OIDC -> AWS_DEPLOY_ROLE_ARN (trusted for this repo's master only)
+      contents: read
+    concurrency:
+      group: cv-bff-node-deploy
+      cancel-in-progress: false # queue deploys, never kill one mid-roll
+    env:
+      AWS_REGION: eu-west-3
+      ECR_REPOSITORY_URI: 760904708057.dkr.ecr.eu-west-3.amazonaws.com/cv-project-bff-node
+      SSM_DOCUMENT_NAME: cv-redeploy-bff-node
+      APP_INSTANCE_NAME_TAG: cv-project-domain-service
+      SMOKE_URL: https://dvdlxl0zqepqi.cloudfront.net/bff/api/v1/people/1/cv
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require the deploy role variable
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          if [ -z "$AWS_DEPLOY_ROLE_ARN" ]; then
+            echo "::error::Repository variable AWS_DEPLOY_ROLE_ARN is not set (the OIDC deploy role from cv-infra)."
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: cv-bff-node-deploy-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.ECR_REPOSITORY_URI }}:latest
+            ${{ env.ECR_REPOSITORY_URI }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Roll the container (SSM Run Command)
+        run: |
+          set -euo pipefail
+          # Target by tag, not instance id: the app host is replaced often.
+          command_id=$(aws ssm send-command \
+            --document-name "$SSM_DOCUMENT_NAME" \
+            --targets "Key=tag:Name,Values=$APP_INSTANCE_NAME_TAG" \
+            --comment "cv-bff-node ${GITHUB_SHA::7}" \
+            --query 'Command.CommandId' --output text)
+          echo "SSM command: $command_id"
+
+          # Poll up to 5 minutes. Invocations appear only once SSM has
+          # resolved the tag, so an empty list counts as "pending".
+          count=0
+          status=Pending
+          instance_id=
+          for _ in $(seq 1 60); do
+            sleep 5
+            invocations=$(aws ssm list-command-invocations \
+              --command-id "$command_id" --details --output json)
+            count=$(jq '.CommandInvocations | length' <<<"$invocations")
+            if [ "$count" -gt 1 ]; then
+              break
+            fi
+            if [ "$count" -eq 1 ]; then
+              status=$(jq -r '.CommandInvocations[0].Status' <<<"$invocations")
+              instance_id=$(jq -r '.CommandInvocations[0].InstanceId' <<<"$invocations")
+              case "$status" in
+                Pending|InProgress|Delayed|Cancelling) continue ;;
+                *) break ;;
+              esac
+            fi
+          done
+
+          if [ "$count" -ne 1 ]; then
+            echo "::error::Expected exactly one invocation of $command_id on tag Name=$APP_INSTANCE_NAME_TAG, found $count."
+            exit 1
+          fi
+
+          # --details carries the plugin output (SSM truncates it to the
+          # first 2500 chars; cv-redeploy's output is a few lines).
+          echo "Invocation status on $instance_id: $status"
+          echo "--- last lines of output ---"
+          jq -r '.CommandInvocations[0].CommandPlugins[]?.Output // empty' <<<"$invocations" | tail -n 20
+          if [ "$status" != "Success" ]; then
+            echo "::error::SSM invocation $command_id ended with status '$status' (expected Success)."
+            exit 1
+          fi
+
+      - name: Smoke test the public aggregate
+        run: |
+          for attempt in $(seq 1 6); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$SMOKE_URL" || echo 000)
+            echo "Attempt $attempt: HTTP $code"
+            if [ "$code" = "200" ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Smoke test failed: $SMOKE_URL did not return 200."
+          exit 1
