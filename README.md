@@ -48,7 +48,7 @@ in `.github/workflows/ci.yml` gates it):
    — no instance id is stored, since the host is replaced often. The job waits (bounded, 5 min)
    for exactly one invocation, prints the tail of its output (`bff-node image: old=… new=…`),
    and fails unless its status is `Success`.
-5. A smoke test retries `GET https://dvdlxl0zqepqi.cloudfront.net/bff/api/v1/people/1/cv`
+5. A smoke test retries `GET https://erfeamor.com/bff/api/v1/people/1/cv`
    (6 × ~10 s) and fails the job unless it returns HTTP 200.
 
 Deploys are serialized (`concurrency: cv-bff-node-deploy`, queued, never cancelled).

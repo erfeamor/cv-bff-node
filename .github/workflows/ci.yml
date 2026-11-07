@@ -184,7 +184,7 @@ jobs:
       AWS_REGION: eu-west-3
       SSM_DOCUMENT_NAME: cv-redeploy-bff-node
       APP_INSTANCE_NAME_TAG: cv-project-domain-service
-      SMOKE_URL: https://dvdlxl0zqepqi.cloudfront.net/bff/api/v1/people/1/cv
+      SMOKE_URL: https://erfeamor.com/bff/api/v1/people/1/cv
     steps:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
